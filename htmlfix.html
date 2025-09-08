@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Peta 3D - Sebaran WNA Imigrasi Biak</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.110/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+    html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; font-family: sans-serif; }
+    #titleOverlay { position: absolute; top: 25px; left: 50%; transform: translateX(-50%); color: white; font-size: 32px; font-weight: bold; text-shadow: 3px 3px 5px #000; z-index: 10; pointer-events: none; text-align: center; width: 90%; text-transform: uppercase; line-height: 1.2; }
+    #titleOverlay span { font-size: 24px; color: #00ffff; }
+    #tooltip { display: none; position: absolute; background-color: rgba(0, 0, 0, 0.8); color: white; padding: 8px; border-radius: 6px; font-size: 14px; pointer-events: none; z-index: 10; border: 1px solid #fff; }
+    
+    /* PERBAIKAN UTAMA: Panel disembunyikan secara default saat halaman dimuat */
+    #infoPanel { 
+        display: none; 
+        position: absolute; top: 110px; right: 15px; width: 650px; max-height: 75%; background: rgba(40, 40, 40, 0.9); color: white; border-radius: 8px; border: 1px solid #555; z-index: 10; overflow: hidden; flex-direction: column; 
+    }
+    
+    #panelHeader { display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background: rgba(60, 60, 60, 0.9); border-top-left-radius: 8px; border-top-right-radius: 8px; flex-shrink: 0; }
+    #panelHeader h2 { margin: 0; font-size: 1.2em; color: #00ffff; }
+    #panelControls { display: flex; gap: 10px; }
+    
+    /* PERBAIKAN: Mengatasi Panel Freeze dengan overflow-y */
+    #panelContent { flex-grow: 1; padding: 0 20px 10px 20px; overflow-y: auto; }
+    
+    #infoPanel h3 { margin-top: 15px; border-bottom: 1px solid #555; padding-bottom: 5px; }
+    #infoPanel table { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+    #infoPanel th, #infoPanel td { padding: 8px; text-align: left; border-bottom: 1px solid #444; word-wrap: break-word; }
+    #infoPanel th { font-size: 0.9em; }
+    #infoPanel td { font-size: 0.85em; }
+    #infoPanel .detail-button { background-color: #007bff; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+    #infoPanel .detail-button:hover { background-color: #0056b3; }
+    
+    #closePanelButton, #minimizePanelButton, #resetViewButton, #showPanelButton { cursor: pointer; background: #555; color: white; border: 1px solid #888; border-radius: 4px; padding: 8px 12px; }
+    #minimizePanelButton { padding: 5px 10px; font-weight: bold; font-size: 16px; line-height: 1; }
+    #panelFooter { padding: 15px; text-align: right; flex-shrink: 0; }
+    #resetViewButton { display: none; position: absolute; top: 20px; left: 20px; z-index: 10; }
+
+    #showPanelButton {
+        display: none;
+        position: absolute; top: 110px; right: 15px; z-index: 11; font-size: 1.2em; padding: 10px 15px;
+    }
+
+    /* Modal Styles */
+    #detailsModal { display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); justify-content: center; align-items: center; }
+    .modal-content { background-color: #282828; margin: auto; padding: 25px; border: 1px solid #888; width: 80%; max-width: 500px; border-radius: 10px; color: #f1f1f1; position: relative; }
+    .modal-header { border-bottom: 1px solid #555; padding-bottom: 15px; margin-bottom: 15px; }
+    .modal-header h2 { margin: 0; color: #00ffff; }
+    #modalCloseButton { color: #aaa; position: absolute; top: 15px; right: 25px; font-size: 28px; font-weight: bold; cursor: pointer; }
+    #modalCloseButton:hover, #modalCloseButton:focus { color: #fff; text-decoration: none; }
+    #modalDetailsTable { width: 100%; }
+    #modalDetailsTable td { padding: 8px 0; font-size: 1.1em; }
+    #modalDetailsTable td:first-child { font-weight: bold; color: #a0a0a0; width: 40%; }
+  </style>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+  <div id="titleOverlay">DATA ORANG ASING PADA WILAYAH KERJA KANTOR IMIGRASI BIAK<br><span id="total-wna-title"></span></div>
+  <button id="resetViewButton">Kembali ke Tampilan Awal</button>
+  <div id="tooltip"></div>
+
+  <button id="showPanelButton" title="Tampilkan Panel">▤</button>
+
+  <div id="infoPanel">
+    <div id="panelHeader">
+      <h2 id="panelTitle"></h2>
+      <div id="panelControls">
+        <button id="minimizePanelButton" title="Minimize">-</button>
+      </div>
+    </div>
+    <div id="panelContent"></div>
+    <div id="panelFooter">
+      <button id="closePanelButton">Tutup</button>
+    </div>
+  </div>
+
+  <div id="detailsModal">
+    <div class="modal-content">
+        <span id="modalCloseButton">&times;</span>
+        <div class="modal-header">
+            <h2 id="modalName"></h2>
+        </div>
+        <table id="modalDetailsTable">
+            <tr><td>Kebangsaan</td><td id="modalKebangsaan"></td></tr>
+            <tr><td>Jenis Kelamin</td><td id="modalLp"></td></tr>
+            <tr><td>Tempat, Tgl Lahir</td><td id="modalTtl"></td></tr>
+            <tr><td>No. Paspor</td><td id="modalPaspor"></td></tr>
+            <tr><td>Jenis Izin Tinggal</td><td id="modalJenisIzin"></td></tr>
+            <tr><td>Masa Berlaku</td><td id="modalMasaBerlaku"></td></tr>
+            <tr><td>Status</td><td id="modalStatus"></td></tr>
+            <tr><td>Keterangan</td><td id="modalKeterangan"></td></tr>
+        </table>
+    </div>
+  </div>
+
+  <script>
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzMjM3M2I0My0yNTQ4LTQwNWMtYjUxYi0yODYwZmI1ODkwZGMiLCJpZCI6MzMzNTI1LCJpYXQiOjE3NTYyNzU0ODl9.jc138BIEbRXEg_JhA_JiHB867UT1a3xmkrxDiPlGDUQ';
+
+    const viewer = new Cesium.Viewer('cesiumContainer', { shouldAnimate: true, infoBox: false, selectionIndicator: false });
+    const titleOverlay = document.getElementById('titleOverlay');
+
+    // --- DATA WNA LENGKAP DARI SEMUA PDF ---
+    const dataWilayah = {
+      "biak": {
+        "totalWNA": 14,
+        "lokasi": [
+          { "nama": "PT. WAPOGA SHIPPING", "lon": 136.033, "lat": -1.143, "wna": [
+            { "no": 1, "nama": "KELAH JOK", "lp": "L", "tempatLahir": "MALAYSIA", "tglLahir": "5/9/1978", "kebangsaan": "MALAYSIA", "paspor": "K54665017", "jenisIzin": "ITAS", "masaBerlaku": "21/06/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN" },
+            { "no": 2, "nama": "ANDY IMANG", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "20/11/1984", "kebangsaan": "MALAYSIA", "paspor": "K39943399", "jenisIzin": "ITAS", "masaBerlaku": "21/06/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN" }
+          ]},
+          { "nama": "BADAN RISET DAN INOVASI NASIONAL (BRIN)", "lon": 136.1033, "lat": -1.1884, "wna": [
+            { "no": 1, "nama": "VARUN KUMAR", "lp": "L", "tempatLahir": "BIHAR", "tglLahir": "28/08/1985", "kebangsaan": "INDIA", "paspor": "01691333", "jenisIzin": "DIPLOMATIK", "masaBerlaku": "16/07/2025", "status": "TKA", "keterangan": "" },
+            { "no": 2, "nama": "MAHESH PRAKASH DHUPEE", "lp": "L", "tempatLahir": "NANDED MAHARASHTRA", "tglLahir": "22/04/1992", "kebangsaan": "INDIA", "paspor": "01652471", "jenisIzin": "DIPLOMATIK", "masaBerlaku": "23/07/2025", "status": "TKA", "keterangan": "" },
+            { "no": 3, "nama": "GAUTAM KUMAR", "lp": "L", "tempatLahir": "DANGWAR, JHARKHAND", "tglLahir": "05/07/1993", "kebangsaan": "INDIA", "paspor": "01678626", "jenisIzin": "DIPLOMATIK", "masaBerlaku": "16/07/2025", "status": "TKA", "keterangan": "" },
+            { "no": 4, "nama": "VINAY MOR", "lp": "L", "tempatLahir": "CHENNAI, TAMIL NADU", "tglLahir": "01/11/1997", "kebangsaan": "INDIA", "paspor": "01669015", "jenisIzin": "DIPLOMATIK", "masaBerlaku": "06/07/2026", "status": "TKA", "keterangan": "" },
+            { "no": 5, "nama": "SELVIN KRISHNASAMY", "lp": "L", "tempatLahir": "AKKAMALAI, TAMIL NADU", "tglLahir": "10/05/1967", "kebangsaan": "INDIA", "paspor": "01678613", "jenisIzin": "DIPLOMATIK", "masaBerlaku": "30/11/2026", "status": "TKA", "keterangan": "" }
+          ]},
+          { "nama": "YAYASAN REBOISASI EDEN PAPUA", "lon": 136.0863, "lat": -1.1767, "wna": [
+            { "no": 1, "nama": "DANIEL JAMES MAXEY", "lp": "L", "tempatLahir": "JAYAPURA", "tglLahir": "22/04/1996", "kebangsaan": "KANADA", "paspor": "AR129273", "jenisIzin": "ITAS", "masaBerlaku": "05/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 2, "nama": "AURORE F.C.JEANNOT", "lp": "P", "tempatLahir": "PERPIGNAN", "tglLahir": "10/11/1991", "kebangsaan": "PERANCIS", "paspor": "20EA48625", "jenisIzin": "ITAS", "masaBerlaku": "28/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" }
+          ]}
+        ],
+        "kategori": [
+          { "nama": "PEMEGANG IZIN TINGGAL TETAP (ITAP)", "wna": [
+            { "no": 1, "nama": "FA YIN LIE", "lp": "P", "tempatLahir": "MERAUKE", "tglLahir": "14/07/1959", "kebangsaan": "BELANDA", "paspor": "NMCH80387", "jenisIzin": "ITAP", "masaBerlaku": "29/01/2029", "status": "MENIKAH DGN WNI", "keterangan": "PEMILIK SINAR PAGI" },
+            { "no": 2, "nama": "JOSEPH KOAMI KOOMSON", "lp": "L", "tempatLahir": "TAKORADI", "tglLahir": "24/08/1989", "kebangsaan": "GHANA", "paspor": "G3492350", "jenisIzin": "ITAP", "masaBerlaku": "22/03/2027", "status": "PENYATUAN KELUARGA", "keterangan": "MENIKAH DENGAN WNI" },
+            { "no": 3, "nama": "TSUN SHU LIU", "lp": "L", "tempatLahir": "TAIWAN", "tglLahir": "10/06/1953", "kebangsaan": "TAIWAN", "paspor": "353382641", "jenisIzin": "ITAP", "masaBerlaku": "22/02/2026", "status": "MENIKAH DGN WNI", "keterangan": "MENIKAH DENGAN WNI" },
+            { "no": 4, "nama": "AHMED MAHMOUD ELTANTAWY", "lp": "L", "tempatLahir": "KAIRO", "tglLahir": "26/05/1977", "kebangsaan": "AMERIKA", "paspor": "501469269", "jenisIzin": "ITAP", "masaBerlaku": "11/02/2028", "status": "ITAP REPATRIASI", "keterangan": "HOTEL NIRMALA BEACH" },
+            { "no": 5, "nama": "YULIA BUSLI", "lp": "P", "tempatLahir": "SURABAYA", "tglLahir": "31/07/1976", "kebangsaan": "AMERIKA", "paspor": "521300792", "jenisIzin": "ITAP", "masaBerlaku": "11/02/2028", "status": "ITAP REPATRIASI", "keterangan": "HOTEL NIRMALA BEACH" }
+          ]}
+        ]
+      },
+      "yapen": {
+        "totalWNA": 9,
+        "lokasi": [
+          { "nama": "PT. SINAR WIJAYA PLYWOOD INDUSTRIES", "lon": 136.7595, "lat": -1.8226, "wna": [
+            { "no": 1, "nama": "WONG KA DOONG", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "31/08/1967", "kebangsaan": "MALAYSIA", "paspor": "K40532344", "jenisIzin": "ITAS", "masaBerlaku": "07/07/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 2, "nama": "HII WEI SIONG", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "09/09/1971", "kebangsaan": "MALAYSIA", "paspor": "K41399641", "jenisIzin": "ITAS", "masaBerlaku": "09/07/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 3, "nama": "PAU CHIONG WOO", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "17/12/1969", "kebangsaan": "MALAYSIA", "paspor": "K54978543", "jenisIzin": "ITAS", "masaBerlaku": "28/05/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 4, "nama": "SYUKUR BIN ABDULLAH", "lp": "L", "tempatLahir": "MALAYSIA", "tglLahir": "14/11/1965", "kebangsaan": "MALAYSIA", "paspor": "K52601429", "jenisIzin": "ITAS", "masaBerlaku": "25/06/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 5, "nama": "JUANAS BIN FRANCIS", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "26/03/1963", "kebangsaan": "MALAYSIA", "paspor": "K51823481", "jenisIzin": "ITAS", "masaBerlaku": "07/07/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 6, "nama": "CHIU MEE CHONG", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "29/07/1971", "kebangsaan": "MALAYSIA", "paspor": "K53194089", "jenisIzin": "ITAS", "masaBerlaku": "16/07/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 7, "nama": "YONG NGOK HEE", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "25/03/1957", "kebangsaan": "MALAYSIA", "paspor": "K54985397", "jenisIzin": "ITAS", "masaBerlaku": "15/06/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 8, "nama": "LAI KUOK MING", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "06/06/1966", "kebangsaan": "MALAYSIA", "paspor": "K54434135", "jenisIzin": "ITAS", "masaBerlaku": "11/06/2025", "status": "TKA", "keterangan": "ITAS PERAIRAN (ITAS IMIGRASI BIAK)" },
+            { "no": 9, "nama": "LEE SIONG LEONG", "lp": "L", "tempatLahir": "SARAWAK", "tglLahir": "29/04/1973", "kebangsaan": "MALAYSIA", "paspor": "K54990827", "jenisIzin": "ITAS", "masaBerlaku": "06/04/2026", "status": "TKA", "keterangan": "ITAS IMIGRASI BIAK" }
+          ]}
+        ]
+      },
+      "nabire": {
+        "totalWNA": 205,
+        "lokasi": [
+          { "nama": "PT. NABIRE BARU", "lon": 135.2709, "lat": -3.418, "wna": [
+            { "no": 1, "nama": "GOPI KRISHNANN", "lp": "L", "tempatLahir": "NEGERI SEMBILAN", "tglLahir": "18/07/1975", "kebangsaan": "MALAYSIA", "paspor": "A60808791", "jenisIzin": "ITAS", "masaBerlaku": "03/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 2, "nama": "JOSHUA JEYENTHIREN ANANTHAM", "lp": "L", "tempatLahir": "KEDAH", "tglLahir": "11/09/1979", "kebangsaan": "SRI LANKA", "paspor": "A59211849", "jenisIzin": "ITAS", "masaBerlaku": "22/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK (EPO)" },
+            { "no": 3, "nama": "DILUSH PRABUDDHA SUNNA DENIYAGE", "lp": "L", "tempatLahir": "THIRMATHAMAY", "tglLahir": "12/12/1984", "kebangsaan": "SRI LANKA", "paspor": "N9815008", "jenisIzin": "ITAS", "masaBerlaku": "24/07/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 4, "nama": "MATAN DORIASAMY", "lp": "L", "tempatLahir": "PAHANG", "tglLahir": "09/04/1979", "kebangsaan": "MALAYSIA", "paspor": "A56495111", "jenisIzin": "ITAS", "masaBerlaku": "13/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 5, "nama": "NISHANTHA EKANAYAKE", "lp": "L", "tempatLahir": "MATALE", "tglLahir": "16/08/1978", "kebangsaan": "MALAYSIA", "paspor": "N10327109", "jenisIzin": "ITAS", "masaBerlaku": "22/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 6, "nama": "LEON INCTON JACOB", "lp": "L", "tempatLahir": "NEGERI SEMBILAN", "tglLahir": "17/01/1971", "kebangsaan": "MALAYSIA", "paspor": "A55210080", "jenisIzin": "ITAS", "masaBerlaku": "22/09/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK" }
+          ]}
+        ],
+        "kategori": [
+          { "nama": "PT. SHENGDA TRADING INDONESIA", "wna": [{"no": 1, "nama": "YU YIXIN", "lp": "L", "tempatLahir": "FUJIAN", "tglLahir": "03/02/1978", "kebangsaan": "CHINA", "paspor": "E93758807", "jenisIzin": "ITAS", "masaBerlaku": "05/02/2027", "status": "INVESTOR", "keterangan": "ITAS KANIM JAKARTA UTARA"}] },
+          { "nama": "PT. BAO SEN INDONESIA", "wna": [{"no": 1, "nama": "YANG YINFENG", "lp": "L", "tempatLahir": "JIANGXI", "tglLahir": "26/02/1974", "kebangsaan": "CHINA", "paspor": "ED0882731", "jenisIzin": "ITAS", "masaBerlaku": "11/05/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, {"no": 2, "nama": "YANG JIANGSU", "lp": "P", "tempatLahir": "LUQUAN", "tglLahir": "16/05/1970", "kebangsaan": "CHINA", "paspor": "EG9112417", "jenisIzin": "ITAP", "masaBerlaku": "14/03/2029", "status": "TKA", "keterangan": "ITAP KANIM DEPOK"}] },
+          { "nama": "PT. RIYI BROTHER INDONESIA", "wna": [
+              {"no": 1, "nama": "LEI LI", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "26/06/1980", "kebangsaan": "CHINA", "paspor": "EL4413308", "jenisIzin": "ITAS", "masaBerlaku": "03/03/2026", "status": "TKA", "keterangan": "BELUM UPDATE"}, 
+              {"no": 2, "nama": "CHEN JINFU", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "15/11/1972", "kebangsaan": "CHINA", "paspor": "EJ6347008", "jenisIzin": "ITAS", "masaBerlaku": "25/01/2025", "status": "TKA", "keterangan": "BELUM UPDATE"},
+              {"no": 3, "nama": "CHEN WEI", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "12/03/1968", "kebangsaan": "CHINA", "paspor": "EJ6004715", "jenisIzin": "ITAS", "masaBerlaku": "28/07/2025", "status": "TKA", "keterangan": "ITAS KANIM TANGGERANG"}, 
+              {"no": 4, "nama": "LI HEJIE", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "02/03/1976", "kebangsaan": "CHINA", "paspor": "EJ7203084", "jenisIzin": "ITAS", "masaBerlaku": "04/04/2026", "status": "TKA", "keterangan": "BELUM UPDATE"},
+              {"no": 5, "nama": "CHUANPENG LI", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "10/05/1973", "kebangsaan": "CHINA", "paspor": "EJ7394724", "jenisIzin": "ITAS", "masaBerlaku": "11/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 6, "nama": "LI KUNLONG", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "02/02/1991", "kebangsaan": "CHINA", "paspor": "E47473423", "jenisIzin": "ITAS", "masaBerlaku": "11/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+              {"no": 7, "nama": "WANG MIAO", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "20/11/1972", "kebangsaan": "CHINA", "paspor": "E38649997", "jenisIzin": "ITAS", "masaBerlaku": "15/05/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"}, 
+              {"no": 8, "nama": "JIANG SHUAI", "lp": "L", "tempatLahir": "ANHUI", "tglLahir": "03/02/1977", "kebangsaan": "CHINA", "paspor": "E97711103", "jenisIzin": "ITAS", "masaBerlaku": "25/01/2025", "status": "TKA", "keterangan": "BELUM UPDATE"},
+              {"no": 18, "nama": "HU QIGANG", "lp": "L", "tempatLahir": "SHAANXI", "tglLahir": "03/06/1977", "kebangsaan": "CHINA", "paspor": "EF3855228", "jenisIzin": "ITAS", "masaBerlaku": "19/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 19, "nama": "ZHANG YONG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "11/03/1971", "kebangsaan": "CHINA", "paspor": "EJ8359044", "jenisIzin": "ITAS", "masaBerlaku": "19/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+              {"no": 20, "nama": "WANXI ZHANG", "lp": "L", "tempatLahir": "GANSU", "tglLahir": "17/08/1972", "kebangsaan": "CHINA", "paspor": "EP1521027", "jenisIzin": "ITAS", "masaBerlaku": "19/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}
+          ]},
+          { "nama": "PT. JAYA HIMALAYA MINING", "wna": [{"no": 1, "nama": "WANG JIAMAO", "lp": "L", "tempatLahir": "JIANGSU", "tglLahir": "27/08/1954", "kebangsaan": "CHINA", "paspor": "EH2262501", "jenisIzin": "ITAS", "masaBerlaku": "11/04/2026", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"}] },
+          { "nama": "PT. YIBO JIN INDONESIA", "wna": [
+            {"no": 1, "nama": "LIU HAN QI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "23/02/1971", "kebangsaan": "CHINA", "paspor": "EF9941136", "jenisIzin": "ITAS", "masaBerlaku": "05/06/2025", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"}, 
+            {"no": 2, "nama": "YUAN JIAN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "10/03/1973", "kebangsaan": "CHINA", "paspor": "EP3200824", "jenisIzin": "ITAS", "masaBerlaku": "04/07/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 3, "nama": "QIU XIAO HU", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EM0478894", "jenisIzin": "ITAS", "masaBerlaku": "17/07/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+            {"no": 4, "nama": "FAN JUN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "07/07/1985", "kebangsaan": "CHINA", "paspor": "EG1710365", "jenisIzin": "BISNIS", "masaBerlaku": "04/08/2026", "status": "N/A", "keterangan": "BELUM DAPAT DIUPDATE"},
+            {"no": 5, "nama": "WU LEI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "04/08/1981", "kebangsaan": "CHINA", "paspor": "E55759881", "jenisIzin": "ITAS", "masaBerlaku": "17/07/2025", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"}, 
+            {"no": 6, "nama": "LI MING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "21/04/1970", "kebangsaan": "CHINA", "paspor": "EM045B5574", "jenisIzin": "ITAS", "masaBerlaku": "22/06/2025", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"},
+            {"no": 7, "nama": "ZANG HUA BING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "15/05/1976", "kebangsaan": "CHINA", "paspor": "EL3887239", "jenisIzin": "ITAS", "masaBerlaku": "22/06/2025", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"}
+          ]},
+          { "nama": "PT. KRISTALIN EKALESTARI", "wna": [
+            {"no": 1, "nama": "NING BO", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "16/05/1986", "kebangsaan": "CHINA", "paspor": "E08003975", "jenisIzin": "ITAS", "masaBerlaku": "04/09/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 2, "nama": "MA CHUAN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "25/03/1987", "kebangsaan": "CHINA", "paspor": "E33640761", "jenisIzin": "ITAS", "masaBerlaku": "27/06/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 3, "nama": "LIU GUOYONG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "27/06/1964", "kebangsaan": "CHINA", "paspor": "EC3569631", "jenisIzin": "ITAS", "masaBerlaku": "16/12/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 4, "nama": "HE JIANMING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "21/04/1965", "kebangsaan": "CHINA", "paspor": "ED5799958", "jenisIzin": "ITAS", "masaBerlaku": "12/04/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 5, "nama": "FENG ZHEN", "lp": "L", "tempatLahir": "HEILONGJIANG", "tglLahir": "10/05/1990", "kebangsaan": "CHINA", "paspor": "E96679986", "jenisIzin": "ITAS", "masaBerlaku": "07/12/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 6, "nama": "LI SHENGQIANG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "03/07/1966", "kebangsaan": "CHINA", "paspor": "ED7910667", "jenisIzin": "ITAS", "masaBerlaku": "31/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 7, "nama": "WA MINGRAN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "12/07/2003", "kebangsaan": "CHINA", "paspor": "EJ2757247", "jenisIzin": "ITAS", "masaBerlaku": "31/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 8, "nama": "ZHAO LIN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "11/02/1987", "kebangsaan": "CHINA", "paspor": "E84078365", "jenisIzin": "ITAS", "masaBerlaku": "31/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 9, "nama": "LI YUHAI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "10/04/1966", "kebangsaan": "CHINA", "paspor": "EJ3194308", "jenisIzin": "ITAS", "masaBerlaku": "31/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 10, "nama": "LIU JIANWEN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "16/05/1987", "kebangsaan": "CHINA", "paspor": "E54223886", "jenisIzin": "ITAS", "masaBerlaku": "12/04/2026", "status": "TKA", "keterangan": "ITAS"},
+            {"no": 11, "nama": "LIU XIAOHUI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "13/08/1993", "kebangsaan": "CHINA", "paspor": "EJ3206333", "jenisIzin": "ITAS", "masaBerlaku": "12/04/2026", "status": "TKA", "keterangan": "ITAS"},
+            {"no": 12, "nama": "WANG YINGQING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "14/04/1963", "kebangsaan": "CHINA", "paspor": "EJ3218037", "jenisIzin": "ITAS", "masaBerlaku": "12/04/2026", "status": "TKA", "keterangan": "ITAS"},
+            {"no": 13, "nama": "XU HONGTOA", "lp": "L", "tempatLahir": "HEILONGJIANG", "tglLahir": "21/09/1992", "kebangsaan": "CHINA", "paspor": "EG3837307", "jenisIzin": "ITAS", "masaBerlaku": "12/04/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 14, "nama": "LIU CHENGBING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "10/01/1971", "kebangsaan": "CHINA", "paspor": "EJ7664351", "jenisIzin": "ITAS", "masaBerlaku": "31/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 15, "nama": "XIE KUI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "04/06/1983", "kebangsaan": "CHINA", "paspor": "EJ7498217", "jenisIzin": "ITAS", "masaBerlaku": "27/06/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 16, "nama": "XIAO ZHENGYONG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "12/03/1963", "kebangsaan": "CHINA", "paspor": "EK3117227", "jenisIzin": "ITAS", "masaBerlaku": "29/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 17, "nama": "YANG XIUJUN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "04/08/1970", "kebangsaan": "CHINA", "paspor": "EK0586219", "jenisIzin": "ITAS", "masaBerlaku": "29/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 18, "nama": "YUAN JING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "03/05/1974", "kebangsaan": "CHINA", "paspor": "E64516143", "jenisIzin": "ITAS", "masaBerlaku": "30/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 19, "nama": "JIAO CHENGWU", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "27/10/1973", "kebangsaan": "CHINA", "paspor": "E88814030", "jenisIzin": "ITAS", "masaBerlaku": "29/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 20, "nama": "CHANG GUOPENG", "lp": "L", "tempatLahir": "HENAN", "tglLahir": "26/02/1993", "kebangsaan": "CHINA", "paspor": "EK2766587", "jenisIzin": "ITAS", "masaBerlaku": "03/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 21, "nama": "HUANG YICHAO", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "30/08/1988", "kebangsaan": "CHINA", "paspor": "EC3550760", "jenisIzin": "ITAS", "masaBerlaku": "03/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 22, "nama": "HU YUANQIANG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "09/07/1977", "kebangsaan": "CHINA", "paspor": "EJ3208527", "jenisIzin": "ITAS", "masaBerlaku": "30/08/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 23, "nama": "LI YANG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "09/05/1998", "kebangsaan": "CHINA", "paspor": "EK3411285", "jenisIzin": "ITAS", "masaBerlaku": "29/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 24, "nama": "WANG TAO", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "28/08/1991", "kebangsaan": "CHINA", "paspor": "EJ8808106", "jenisIzin": "ITAS", "masaBerlaku": "03/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 25, "nama": "WANG YONGJIAN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "06/12/1979", "kebangsaan": "CHINA", "paspor": "EB5016027", "jenisIzin": "ITAS", "masaBerlaku": "03/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 26, "nama": "YANG MAOLIN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "23/08/1982", "kebangsaan": "CHINA", "paspor": "E41861481", "jenisIzin": "ITAS", "masaBerlaku": "05/08/2023", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 27, "nama": "YUAN XU", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "20/11/1987", "kebangsaan": "CHINA", "paspor": "EK3115573", "jenisIzin": "ITAS", "masaBerlaku": "30/08/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 28, "nama": "ZHAO JINGKUI", "lp": "L", "tempatLahir": "SHADONG", "tglLahir": "09/07/1970", "kebangsaan": "CHINA", "paspor": "EJ7456663", "jenisIzin": "ITAS", "masaBerlaku": "04/09/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 29, "nama": "LAN HONGJUN", "lp": "L", "tempatLahir": "SHADONG", "tglLahir": "04/11/1972", "kebangsaan": "CHINA", "paspor": "E86627653", "jenisIzin": "ITAS", "masaBerlaku": "28/08/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 30, "nama": "WEN JINGAO", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "25/04/1977", "kebangsaan": "CHINA", "paspor": "E97461691", "jenisIzin": "ITAS", "masaBerlaku": "29/08/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 31, "nama": "NING ZHONGQUAN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "28/12/1979", "kebangsaan": "CHINA", "paspor": "E74464001", "jenisIzin": "ITAS", "masaBerlaku": "30/08/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 32, "nama": "ZHANG BO", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "09/07/1976", "kebangsaan": "CHINA", "paspor": "E57142496", "jenisIzin": "ITAS", "masaBerlaku": "26/09/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 33, "nama": "HU XIUFA", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "10/05/1971", "kebangsaan": "CHINA", "paspor": "EG3780785", "jenisIzin": "ITAS", "masaBerlaku": "26/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 34, "nama": "HU SHUBING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "15/08/1981", "kebangsaan": "CHINA", "paspor": "EJ8808638", "jenisIzin": "ITAS", "masaBerlaku": "26/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 35, "nama": "JIANG NAIJIAN", "lp": "L", "tempatLahir": "HEILONGJIANG", "tglLahir": "15/06/1987", "kebangsaan": "CHINA", "paspor": "EF6343727", "jenisIzin": "ITAS", "masaBerlaku": "28/06/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 36, "nama": "CHEN MINGJING", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EK0634579", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "N/A", "status": "CALON TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 37, "nama": "JIANG XINBING", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EL3726502", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "05/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 38, "nama": "CHEN JIAN", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EL8450430", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "10/08/2025", "status": "CALON TKA", "keterangan": "ITK KANIM BIAK"},
+            {"no": 39, "nama": "NING BO", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EK1476162", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "N/A", "status": "CALON TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 40, "nama": "CHEN YINGGANG", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EM9181893", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "N/A", "status": "CALON TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 41, "nama": "LIANG JIANG TAO", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EM3788539", "jenisIzin": "ITK 60 HARI", "masaBerlaku": "10/08/2025", "status": "CALON TKA", "keterangan": "ITK KANIM BIAK"}
+          ]},
+          { "nama": "PT. CENDERAWASIH MANDIRI NUSANTARA", "wna": [
+            {"no": 1, "nama": "GLEB KAIGARODOV", "lp": "L", "tempatLahir": "USSR", "tglLahir": "07/10/1987", "kebangsaan": "RUSIA", "paspor": "667971277", "jenisIzin": "ITAS", "masaBerlaku": "05/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 2, "nama": "EVEGENI POKUTNYA", "lp": "L", "tempatLahir": "USSR", "tglLahir": "16/01/1983", "kebangsaan": "RUSIA", "paspor": "769471473", "jenisIzin": "ITAS", "masaBerlaku": "05/05/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 3, "nama": "IAKOV ZASYPKIN", "lp": "L", "tempatLahir": "RUSIA", "tglLahir": "01/09/1986", "kebangsaan": "RUSIA", "paspor": "666640744", "jenisIzin": "ITAS", "masaBerlaku": "12/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 4, "nama": "DMITRII NISTRATOV", "lp": "L", "tempatLahir": "RUSIA", "tglLahir": "11/12/1977", "kebangsaan": "RUSIA", "paspor": "756377733", "jenisIzin": "ITAS", "masaBerlaku": "12/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 5, "nama": "TROFIMOV EVGENI", "lp": "L", "tempatLahir": "USSR", "tglLahir": "28/08/1989", "kebangsaan": "RUSIA", "paspor": "760185985", "jenisIzin": "ITAS", "masaBerlaku": "29/12/2024", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 6, "nama": "VLADIMIR IVANOV", "lp": "L", "tempatLahir": "USSR", "tglLahir": "17/09/1986", "kebangsaan": "RUSIA", "paspor": "753567140", "jenisIzin": "ITAS", "masaBerlaku": "04/04/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"},
+            {"no": 7, "nama": "ALESHIN ANDREI", "lp": "L", "tempatLahir": "USSR", "tglLahir": "12/11/1984", "kebangsaan": "RUSIA", "paspor": "770226207", "jenisIzin": "ITAS", "masaBerlaku": "09/03/2025", "status": "TKA", "keterangan": "BELUM DIUPDATE"}
+          ]},
+          { "nama": "PT. RUN HENG INDO INTERNATIONAL", "wna": [ 
+            {"no": 1, "nama": "LIU ZONGJUN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "26/08/1970", "kebangsaan": "CHINA", "paspor": "EJ3867163", "jenisIzin": "ITAS", "masaBerlaku": "21/02/2025", "status": "TKA", "keterangan": "BELUM DAPAT DIUPDATE"},
+            {"no": 2, "nama": "BIN LI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "26/07/1967", "kebangsaan": "CHINA", "paspor": "EM1352209", "jenisIzin": "ITAS", "masaBerlaku": "24/06/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 3, "nama": "TIANYOU CHEN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "16/10/1987", "kebangsaan": "CHINA", "paspor": "EC3443066", "jenisIzin": "ITAS", "masaBerlaku": "26/07/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 4, "nama": "JIANKE LUO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "10/08/1974", "kebangsaan": "CHINA", "paspor": "EC7473181", "jenisIzin": "ITAS", "masaBerlaku": "26/07/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 5, "nama": "LI SHANGWU", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "03/07/1970", "kebangsaan": "CHINA", "paspor": "EC3443067", "jenisIzin": "ITAS", "masaBerlaku": "19/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 7, "nama": "SHANGWU LI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "03/07/1970", "kebangsaan": "CHINA", "paspor": "EC3443067", "jenisIzin": "ITAS", "masaBerlaku": "19/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 8, "nama": "YANG BING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "18/10/1985", "kebangsaan": "CHINA", "paspor": "EB3046658", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 9, "nama": "WANG YUJIA", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "03/10/1995", "kebangsaan": "CHINA", "paspor": "EA7637353", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 10, "nama": "YANG KAIPI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "16/12/1975", "kebangsaan": "CHINA", "paspor": "EL6066430", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 11, "nama": "LIU GUANGWANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "04/04/1966", "kebangsaan": "CHINA", "paspor": "EM3087557", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 12, "nama": "YI YONGQING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "19/08/1986", "kebangsaan": "CHINA", "paspor": "EB3049383", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 13, "nama": "ZENG ZHIYUN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "05/01/1965", "kebangsaan": "CHINA", "paspor": "EM2929524", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 14, "nama": "LI YUNHONG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "21/12/1962", "kebangsaan": "CHINA", "paspor": "EJ3889459", "jenisIzin": "ITAS", "masaBerlaku": "13/10/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 15, "nama": "LIU JIANHONG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "27/09/1971", "kebangsaan": "CHINA", "paspor": "EE2307706", "jenisIzin": "ITAS", "masaBerlaku": "16/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 16, "nama": "XU JUN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "21/10/1983", "kebangsaan": "CHINA", "paspor": "EN2880309", "jenisIzin": "ITAS", "masaBerlaku": "16/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 17, "nama": "ZHANG YU", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "28/11/1992", "kebangsaan": "CHINA", "paspor": "EN6772655", "jenisIzin": "ITAS", "masaBerlaku": "16/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 18, "nama": "FU WEIJUN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "16/02/1973", "kebangsaan": "CHINA", "paspor": "EG6060029", "jenisIzin": "ITAS", "masaBerlaku": "16/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 19, "nama": "PENG FUJIAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "10/02/1975", "kebangsaan": "CHINA", "paspor": "EN9818841", "jenisIzin": "ITAS", "masaBerlaku": "19/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 20, "nama": "HUANG LU", "lp": "P", "tempatLahir": "HUNAN", "tglLahir": "13/10/2003", "kebangsaan": "CHINA", "paspor": "EN1428431", "jenisIzin": "ITAS", "masaBerlaku": "13/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 21, "nama": "JUNHUI CHEN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "05/02/1983", "kebangsaan": "CHINA", "paspor": "EC7510607", "jenisIzin": "ITAS", "masaBerlaku": "16/06/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 22, "nama": "GAN ZHWEI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "05/10/1984", "kebangsaan": "CHINA", "paspor": "EP2342421", "jenisIzin": "ITK", "masaBerlaku": "08/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 23, "nama": "HUANG GUOLIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "15/02/1977", "kebangsaan": "CHINA", "paspor": "EP5568559", "jenisIzin": "ITK", "masaBerlaku": "05/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 24, "nama": "LI TENG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "08/09/1989", "kebangsaan": "CHINA", "paspor": "EP2372590", "jenisIzin": "ITK", "masaBerlaku": "08/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 25, "nama": "TANG JIANQIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "21/03/1975", "kebangsaan": "CHINA", "paspor": "EP2480602", "jenisIzin": "ITK", "masaBerlaku": "05/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 26, "nama": "CHEN YING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "23/11/1967", "kebangsaan": "CHINA", "paspor": "EM1352209", "jenisIzin": "ITAS", "masaBerlaku": "19/09/2025", "status": "TKA", "keterangan": ""},
+            {"no": 27, "nama": "YANG YIN FENG", "lp": "L", "tempatLahir": "JIANGXI", "tglLahir": "26/02/1974", "kebangsaan": "CHINA", "paspor": "ED0882731", "jenisIzin": "ITK", "masaBerlaku": "05/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 28, "nama": "ZHOU QINGTANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "08/01/1985", "kebangsaan": "CHINA", "paspor": "EP2529458", "jenisIzin": "ITK", "masaBerlaku": "05/08/2025", "status": "Calon TKA", "keterangan": ""},
+            {"no": 29, "nama": "CHEN ZHENGQIAO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "01/05/1985", "kebangsaan": "CHINA", "paspor": "EN2880309", "jenisIzin": "ITAS", "masaBerlaku": "19/01/2026", "status": "TKA", "keterangan": ""},
+            {"no": 30, "nama": "HE HAIHONG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "18/01/1985", "kebangsaan": "CHINA", "paspor": "EL6079232", "jenisIzin": "ITAS", "masaBerlaku": "19/01/2025", "status": "TKA", "keterangan": ""}
+          ]},
+          { "nama": "PT. WANSHUAI INDO MINING", "wna": [
+            {"no": 1, "nama": "LONG HONG LIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "21/05/1982", "kebangsaan": "CHINA", "paspor": "EL4600195", "jenisIzin": "ITAS", "masaBerlaku": "20/06/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 2, "nama": "REN PENGGUO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "20/01/1986", "kebangsaan": "CHINA", "paspor": "EL2212028", "jenisIzin": "ITAS", "masaBerlaku": "09/09/2025", "status": "KUNJUNGAN", "keterangan": "Proses alih status ke ITAS"},
+            {"no": 3, "nama": "ZHU ZHONGHUA", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "01/01/1974", "kebangsaan": "CHINA", "paspor": "EB5701977", "jenisIzin": "ITAS", "masaBerlaku": "12/03/2026", "status": "TKA", "keterangan": "SEDANG DALAM PROSES"},
+            {"no": 4, "nama": "YANG CHENGDONG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "22/11/1974", "kebangsaan": "CHINA", "paspor": "EM3118603", "jenisIzin": "ITAS", "masaBerlaku": "03/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 5, "nama": "SHU XIAOPING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "02/10/1976", "kebangsaan": "CHINA", "paspor": "EL3329687", "jenisIzin": "ITAS", "masaBerlaku": "09/01/2026", "status": "KUNJUNGAN", "keterangan": "Proses alih status ke ITAS"},
+            {"no": 6, "nama": "YANG QUANFANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "20/03/1976", "kebangsaan": "CHINA", "paspor": "EN6742144", "jenisIzin": "ITAS", "masaBerlaku": "12/03/2026", "status": "TKA", "keterangan": "SEDANG DALAM PROSES"},
+            {"no": 7, "nama": "DONG GUANGLEI", "lp": "L", "tempatLahir": "HEBEI", "tglLahir": "15/08/1983", "kebangsaan": "CHINA", "paspor": "EJ9280943", "jenisIzin": "ITAS", "masaBerlaku": "15/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 8, "nama": "GUO JUN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "04/01/1989", "kebangsaan": "CHINA", "paspor": "EN2851442", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 9, "nama": "LIU BO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "26/10/1987", "kebangsaan": "CHINA", "paspor": "EN1425154", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 10, "nama": "LIU DEZHANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "20/01/1971", "kebangsaan": "CHINA", "paspor": "EH5089698", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 11, "nama": "TANG HUI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "11/05/1986", "kebangsaan": "CHINA", "paspor": "EN1406331", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 12, "nama": "XIONG ZHENGQUAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "08/03/1976", "kebangsaan": "CHINA", "paspor": "EG6065676", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 13, "nama": "YIN GUIBING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "15/08/1965", "kebangsaan": "CHINA", "paspor": "EK1006935", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 14, "nama": "ZHANG KAI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "24/08/1986", "kebangsaan": "CHINA", "paspor": "EJ5558817", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 15, "nama": "ZHENG WEI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "07/05/1973", "kebangsaan": "CHINA", "paspor": "EK2678944", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 16, "nama": "LIU SHUANGLIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "07/04/1982", "kebangsaan": "CHINA", "paspor": "EK9854495", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 17, "nama": "HAO ERLU", "lp": "L", "tempatLahir": "SAANXHI", "tglLahir": "28/01/1986", "kebangsaan": "CHINA", "paspor": "EB9386833", "jenisIzin": "ITAS", "masaBerlaku": "15/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 18, "nama": "FU ZHONGLIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "01/09/1977", "kebangsaan": "CHINA", "paspor": "EN2843434", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 19, "nama": "HU JIE", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "09/05/1986", "kebangsaan": "CHINA", "paspor": "E88497614", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 20, "nama": "DONG LIHUI", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EB5103765", "jenisIzin": "ITAS", "masaBerlaku": "31/10/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 21, "nama": "ZHAO SHU", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "17/10/1972", "kebangsaan": "CHINA", "paspor": "EN9803173", "jenisIzin": "ITAS", "masaBerlaku": "12/03/2026", "status": "TKA", "keterangan": "SEDANG DALAM PROSES"},
+            {"no": 22, "nama": "DONG ZHIQI", "lp": "L", "tempatLahir": "HEBEI", "tglLahir": "25/03/1982", "kebangsaan": "CHINA", "paspor": "EN4028559", "jenisIzin": "ITAS", "masaBerlaku": "08/04/2026", "status": "TKA", "keterangan": "PROSES ALIH STATUS KE ITAS"},
+            {"no": 23, "nama": "LIU YANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "28/11/1983", "kebangsaan": "CHINA", "paspor": "ED4970667", "jenisIzin": "ITAS", "masaBerlaku": "03/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 24, "nama": "CHEN SONGBAI", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "23/10/1967", "kebangsaan": "CHINA", "paspor": "EF8833387", "jenisIzin": "ITAS", "masaBerlaku": "03/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 25, "nama": "SHI ZHANLEI", "lp": "L", "tempatLahir": "HEBEI", "tglLahir": "29/08/1986", "kebangsaan": "CHINA", "paspor": "EF5563240", "jenisIzin": "ITAS", "masaBerlaku": "24/02/2026", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"},
+            {"no": 26, "nama": "HUANG HUAMING", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "24/08/1981", "kebangsaan": "CHINA", "paspor": "EJ3873419", "jenisIzin": "ITAS", "masaBerlaku": "08/05/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 27, "nama": "ZHANG MIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "22/10/1983", "kebangsaan": "CHINA", "paspor": "ED0088153", "jenisIzin": "ITAS", "masaBerlaku": "08/05/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 28, "nama": "LUO RENLIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "18/02/1962", "kebangsaan": "CHINA", "paspor": "EJ1244975", "jenisIzin": "ITAS", "masaBerlaku": "08/05/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 29, "nama": "YUAN JIANLIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "27/08/1975", "kebangsaan": "CHINA", "paspor": "EJ3861397", "jenisIzin": "ITAS", "masaBerlaku": "08/05/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 30, "nama": "YUAN QIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "07/02/1977", "kebangsaan": "CHINA", "paspor": "EN2894423", "jenisIzin": "ITAS", "masaBerlaku": "08/05/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"},
+            {"no": 31, "nama": "FU GAOFENG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "20/07/1980", "kebangsaan": "CHINA", "paspor": "EG1290147", "jenisIzin": "C18", "masaBerlaku": "15/06/2025", "status": "TKA", "keterangan": "PROSES ALIH STATUS KE ITAS"},
+            {"no": 32, "nama": "YANG CHENGQUAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "03/06/1970", "kebangsaan": "CHINA", "paspor": "EK1031414", "jenisIzin": "ITAS", "masaBerlaku": "13/06/2026", "status": "TKA", "keterangan": "PROSES ALIH STATUS KE ITAS"},
+            {"no": 33, "nama": "YANG HENG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "16/11/1980", "kebangsaan": "CHINA", "paspor": "EC9028651", "jenisIzin": "C18", "masaBerlaku": "14/08/2025", "status": "TKA", "keterangan": "PROSES ALIH STATUS KE ITAS"},
+            {"no": 34, "nama": "LI GANGYAO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "29/01/1966", "kebangsaan": "CHINA", "paspor": "EN4970287", "jenisIzin": "C18", "masaBerlaku": "12/07/2025", "status": "On Training", "keterangan": "ITK KANIM BIAK"},
+            {"no": 35, "nama": "HUANG HAILIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "10/11/1975", "kebangsaan": "CHINA", "paspor": "EJ7598537", "jenisIzin": "ITAS", "masaBerlaku": "27/05/2026", "status": "TKA", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 36, "nama": "PENG TIENIU", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "21/04/1975", "kebangsaan": "CHINA", "paspor": "EH0398499", "jenisIzin": "C18", "masaBerlaku": "12/07/2025", "status": "TKA", "keterangan": "ITK KANIM BIAK"},
+            {"no": 37, "nama": "LIU GAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "25/08/1988", "kebangsaan": "CHINA", "paspor": "EK3559741", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 38, "nama": "PENG BOLIN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "02/08/1982", "kebangsaan": "CHINA", "paspor": "EL6076456", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 39, "nama": "PENG JIANBO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "01/02/1977", "kebangsaan": "CHINA", "paspor": "EN6786064", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 40, "nama": "SONG CHANGQUAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "20/10/1976", "kebangsaan": "CHINA", "paspor": "EH9089219", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 41, "nama": "ZHOU JIAWANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "15/12/1965", "kebangsaan": "CHINA", "paspor": "EN4970286", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 42, "nama": "LIU YUAN YANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "27/01/1973", "kebangsaan": "CHINA", "paspor": "E94126975", "jenisIzin": "C18", "masaBerlaku": "28/07/2025", "status": "On Training", "keterangan": "ITK KANIM MIMIKA"},
+            {"no": 43, "nama": "SU LINHAN", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "01/10/1977", "kebangsaan": "CHINA", "paspor": "EC5783335", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "TKA", "keterangan": "ITK KANIM BIAK (Proses RPTKA)"},
+            {"no": 44, "nama": "PU DAI LIANG", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "18/12/1964", "kebangsaan": "CHINA", "paspor": "EN9852991", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "TKA", "keterangan": "ITK KANIM BIAK (Proses RPTKA)"},
+            {"no": 45, "nama": "SHI CHAOBO", "lp": "L", "tempatLahir": "HEBEI", "tglLahir": "01/07/1976", "kebangsaan": "CHINA", "paspor": "EN7209117", "jenisIzin": "C18", "masaBerlaku": "08/06/2025", "status": "TKA", "keterangan": "ITK KANIM BIAK (Proses RPTKA)"}
+          ]},
+          { "nama": "PT. XINDA MINING", "wna": [ 
+              {"no": 1, "nama": "JIAN JIAN HU", "lp": "L", "tempatLahir": "JIANGXI", "tglLahir": "02/04/1971", "kebangsaan": "CHINA", "paspor": "EK1984055", "jenisIzin": "ITAS", "masaBerlaku": "26/06/2026", "status": "TKA", "keterangan": "DIREKTORAT JENDERAL IMIGRASI"}, 
+              {"no": 2, "nama": "LUO XIANJIAN", "lp": "L", "tempatLahir": "JIANGXI", "tglLahir": "14/12/1986", "kebangsaan": "CHINA", "paspor": "E89782429", "jenisIzin": "ITAS", "masaBerlaku": "05/11/2025", "status": "TKA", "keterangan": "DIREKTORAT JENDERAL IMIGRASI"}, 
+              {"no": 3, "nama": "TENG BO", "lp": "L", "tempatLahir": "HUNAN", "tglLahir": "11/10/2000", "kebangsaan": "CHINA", "paspor": "EN4972397", "jenisIzin": "ITAS", "masaBerlaku": "14/12/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 4, "nama": "FU RENPING", "lp": "L", "tempatLahir": "JIANGXI", "tglLahir": "02/10/1976", "kebangsaan": "CHINA", "paspor": "E8216448", "jenisIzin": "ITAS", "masaBerlaku": "08/03/2026", "status": "TKA", "keterangan": "DIREKTORAT JENDERAL IMIGRASI"} 
+          ]},
+          { "nama": "PT. HAIRUN INDUSTRIAL INDONESIA", "wna": [ 
+              {"no": 1, "nama": "WANG XINYU", "lp": "L", "tempatLahir": "SHANDONG", "tglLahir": "04/02/1973", "kebangsaan": "CHINA", "paspor": "EJ5049493", "jenisIzin": "ITAS", "masaBerlaku": "15/01/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"}, 
+              {"no": 2, "nama": "TANG KUNJI", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "05/08/1987", "kebangsaan": "CHINA", "paspor": "EN5386475", "jenisIzin": "ITAS", "masaBerlaku": "12/12/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 3, "nama": "ZHOU MIN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "22/12/1976", "kebangsaan": "CHINA", "paspor": "EF9443629", "jenisIzin": "ITAS", "masaBerlaku": "14/01/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 4, "nama": "LUO JIANQIANG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "12/03/1972", "kebangsaan": "CHINA", "paspor": "E73948126", "jenisIzin": "ITAS", "masaBerlaku": "20/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 5, "nama": "WANG GANG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "12/09/1972", "kebangsaan": "CHINA", "paspor": "EN5454731", "jenisIzin": "ITAS", "masaBerlaku": "26/02/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 6, "nama": "MI ZHOUJUN", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "12/04/1985", "kebangsaan": "CHINA", "paspor": "EN3169839", "jenisIzin": "ITAS", "masaBerlaku": "06/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 7, "nama": "DENG KE", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "15/11/1988", "kebangsaan": "CHINA", "paspor": "EN7903364", "jenisIzin": "ITAS", "masaBerlaku": "06/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 8, "nama": "ZHOU XIAOYU", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "31/03/1990", "kebangsaan": "CHINA", "paspor": "EN3168207", "jenisIzin": "ITAS", "masaBerlaku": "27/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 9, "nama": "ZHANG HONG", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "19/10/1971", "kebangsaan": "CHINA", "paspor": "EP0618033", "jenisIzin": "ITAS", "masaBerlaku": "27/03/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 10, "nama": "WU TAO", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EN5428484", "jenisIzin": "ALIH STATUS ITAS", "masaBerlaku": "N/A", "status": "CALON TKA", "keterangan": "BELUM UPDATE"}, 
+              {"no": 11, "nama": "WANG ZHONGHU", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EK9197368", "jenisIzin": "ITAS", "masaBerlaku": "02/07/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 12, "nama": "SUN CHAO", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "E84105648", "jenisIzin": "ITAS", "masaBerlaku": "02/07/2026", "status": "TKA", "keterangan": "ITAS KANIM BIAK"} 
+          ]},
+          { "nama": "PT. DUTA PUTRA UTAMA", "wna": [{"no": 1, "nama": "TIAN RUNCAI", "lp": "L", "tempatLahir": "LIAONING", "tglLahir": "24/07/1963", "kebangsaan": "CHINA", "paspor": "E99366102", "jenisIzin": "ITAS", "masaBerlaku": "23/10/2026", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"}]},
+          { "nama": "PT. BANGWANGYU KUANGYE INDONESIA", "wna": [ 
+              {"no": 1, "nama": "JIANG QINGCHUAN", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "15/04/1984", "kebangsaan": "CHINA", "paspor": "EM3128062", "jenisIzin": "ITAS", "masaBerlaku": "17/11/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"}, 
+              {"no": 2, "nama": "TANG LIHUA", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "03/01/1963", "kebangsaan": "CHINA", "paspor": "EJ7763484", "jenisIzin": "ITK", "masaBerlaku": "19/06/2025", "status": "KUNJUNGAN", "keterangan": "ITK KANIM BIAK"}, 
+              {"no": 3, "nama": "GAO HONGLIANG", "lp": "L", "tempatLahir": "HEILONGJIANG", "tglLahir": "30/08/1982", "kebangsaan": "CHINA", "paspor": "ED0842273", "jenisIzin": "ITAS", "masaBerlaku": "11/12/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA PUSAT"}, 
+              {"no": 4, "nama": "XU FEI", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "24/11/1963", "kebangsaan": "CHINA", "paspor": "EN2138806", "jenisIzin": "ITK", "masaBerlaku": "10/12/2025", "status": "KUNJUNGAN", "keterangan": "ITK KANIM JAKARTA PUSAT"}, 
+              {"no": 5, "nama": "TANG LIGUO", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "29/10/1967", "kebangsaan": "CHINA", "paspor": "EJ9868601", "jenisIzin": "ITK", "masaBerlaku": "28/05/2025", "status": "KUNJUNGAN", "keterangan": "ITK KANIM JAKARTA PUSAT"}, 
+              {"no": 6, "nama": "CAI SHUHUA", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "20/02/1963", "kebangsaan": "CHINA", "paspor": "EG2595908", "jenisIzin": "ITAS", "masaBerlaku": "18/02/2026", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA BARAT"}, 
+              {"no": 7, "nama": "CHU CHUCHENG", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EN3263360", "jenisIzin": "ITAS", "masaBerlaku": "22/02/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 8, "nama": "FENG MEIYU", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EN6211732", "jenisIzin": "ITAS", "masaBerlaku": "20/03/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 9, "nama": "WANG, CUNFA", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "E79276521", "jenisIzin": "ITAS", "masaBerlaku": "20/02/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 10, "nama": "CHEN JIANGUO", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EC3446680", "jenisIzin": "ITAS", "masaBerlaku": "16/03/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 11, "nama": "XU, LIANGCAI", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EM7985901", "jenisIzin": "ITAS", "masaBerlaku": "17/12/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 12, "nama": "HUANG, JUNCHENG", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "CHINA", "paspor": "EN9188318", "jenisIzin": "ITAS", "masaBerlaku": "20/03/2026", "status": "TKA", "keterangan": "N/A"}, 
+              {"no": 13, "nama": "CAI DONGHHUA", "lp": "L", "tempatLahir": "HUBEI", "tglLahir": "06/12/1973", "kebangsaan": "CHINA", "paspor": "EN6211730", "jenisIzin": "ITAS", "masaBerlaku": "11/12/2025", "status": "TKA", "keterangan": "ITAS KANIM JAKARTA BARAT"} 
+          ]},
+          { "nama": "PT. SUMBER AKARINDO UTAMA", "wna": [
+              {"no": 1, "nama": "LIANG LIPING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "03/10/1986", "kebangsaan": "CHINA", "paspor": "EF2919835", "jenisIzin": "ITAS", "masaBerlaku": "17/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 2, "nama": "LI PING", "lp": "L", "tempatLahir": "SICHUAN", "tglLahir": "18/09/1973", "kebangsaan": "CHINA", "paspor": "EJ2719035", "jenisIzin": "ITAS", "masaBerlaku": "17/09/2025", "status": "TKA", "keterangan": "ITAS KANIM BIAK"}
+          ]},
+          { "nama": "PT. SIGMA SOLUTIONS ADVISORS", "wna": [ 
+              {"no": 1, "nama": "HARIM AQUIM PASCUAL RODRIGUEZ", "lp": "L", "tempatLahir": "GUATEMALA", "tglLahir": "N/A", "kebangsaan": "GUATEMALA", "paspor": "414879287", "jenisIzin": "ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 2, "nama": "ALDEN HARIM PASCUAL RODRIGUEZ", "lp": "L", "tempatLahir": "GUATEMALA", "tglLahir": "N/A", "kebangsaan": "GUATEMALA", "paspor": "PA0892741", "jenisIzin": "ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 3, "nama": "JULISSA LINETH RODRIGUEZ SANCHEZ", "lp": "P", "tempatLahir": "PANAMA", "tglLahir": "N/A", "kebangsaan": "PANAMA", "paspor": "PA0898503", "jenisIzin": "ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 4, "nama": "FRANCISCO PASCUAL MIGUEL", "lp": "L", "tempatLahir": "PANAMA", "tglLahir": "N/A", "kebangsaan": "PANAMA", "paspor": "174061048", "jenisIzin": "ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "ITAS KANIM BIAK"} 
+          ]},
+          { "nama": "PT. HARMONI ENERGI TAMBANG", "wna": [ 
+              {"no": 1, "nama": "Yuan Qiang", "lp": "L", "tempatLahir": "KELLE", "tglLahir": "10/06/1984", "kebangsaan": "CHINA", "paspor": "EN2894423", "jenisIzin": "ITAS", "masaBerlaku": "03/06/2026", "status": "N/A", "keterangan": "ITAS KANIM BIAK"}, 
+              {"no": 2, "nama": "Zhang Min", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "ED0088153", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 3, "nama": "Yuan Jianlin", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EJ3861397", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 4, "nama": "Luo Renlin", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EJ1244975", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 5, "nama": "Huang Huaming", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EJ38773419", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 6, "nama": "Dong Zhiqi", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EN4028559", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 7, "nama": "Yang Chengdong", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EM3118603", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 8, "nama": "Liu Yang", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "ED4970667", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 9, "nama": "Su Linhan", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EC5783335", "jenisIzin": "ITK", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 10, "nama": "Pa Dailiang", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EN9852991", "jenisIzin": "ITK", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"}, 
+              {"no": 11, "nama": "Chen Song Bai", "lp": "L", "tempatLahir": "N/A", "tglLahir": "N/A", "kebangsaan": "N/A", "paspor": "EF8833387", "jenisIzin": "Altus ITAS", "masaBerlaku": "N/A", "status": "N/A", "keterangan": "BELUM UPDATE"} 
+          ]},
+          { "nama": "PT. YAYASAN DONOR KASIH INDONESIA", "wna": [
+            { "no": 1, "nama": "IWAN BOERSMA", "lp": "L", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "16/03/1981", "kebangsaan": "AFRIKA SELATAN", "paspor": "M00268209", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 2, "nama": "MAGDA MARIE BOERSMA", "lp": "P", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "16/12/1983", "kebangsaan": "AFRIKA SELATAN", "paspor": "M00339565", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 3, "nama": "SIMEON BOERSMA", "lp": "L", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "22/01/2015", "kebangsaan": "AFRIKA SELATAN", "paspor": "A07600891", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 4, "nama": "SALOME BOERSMA", "lp": "P", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "21/01/2017", "kebangsaan": "AFRIKA SELATAN", "paspor": "A07483729", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 5, "nama": "SAMUEL BOERSMA", "lp": "L", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "29/12/2022", "kebangsaan": "AFRIKA SELATAN", "paspor": "A07732698", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" },
+            { "no": 6, "nama": "SILAS BOERSMA", "lp": "L", "tempatLahir": "AFRIKA SELATAN", "tglLahir": "18/04/2020", "kebangsaan": "AFRIKA SELATAN", "paspor": "A07459041", "jenisIzin": "ITAS", "masaBerlaku": "09/05/2026", "status": "ITAS", "keterangan": "ITAS KANIM BIAK" }
+          ]},
+          { "nama": "PT. GHZ MINING DEVELOPMENT", "wna": [
+            { "no": 1, "nama": "GAN JINGYUN", "lp": "L", "tempatLahir": "CHINA", "tglLahir": "10/01/1964", "kebangsaan": "CHINA", "paspor": "EN0451380", "jenisIzin": "ITAS", "masaBerlaku": "09/09/2026", "status": "INVESTOR", "keterangan": "ITAS KANIM BIAK" }
+          ]}
+        ]
+      },
+      "supiori": { "totalWNA": 0 },
+      "waropen": { "totalWNA": 0 }
+    };
+    // --- AKHIR DARI DATA LENGKAP ---
+
+  const grandTotalWNA = 228;
+    document.getElementById('total-wna-title').innerText = `TOTAL: ${grandTotalWNA} ORANG ASING`;
+    const defaultTitleHTML = titleOverlay.innerHTML;
+
+    const wilayahKerja = [
+      { id: 'biak', name: 'Kab. Biak Numfor', lon: 136.08, lat: -1.17, zoomHeight: 100000 },
+      { id: 'supiori', name: 'Kab. Supiori', lon: 135.72, lat: -0.73, zoomHeight: 80000 },
+      { id: 'nabire', name: 'Kab. Nabire', lon: 135.50, lat: -3.36, zoomHeight: 200000 },
+      { id: 'yapen', name: 'Kab. Kep. Yapen', lon: 136.23, lat: -1.87, zoomHeight: 150000 },
+      { id: 'waropen', name: 'Kab. Waropen', lon: 136.51, lat: -2.33, zoomHeight: 250000 }
+    ];
+    
+    const companyEntities = {};
+    const infoPanel = document.getElementById('infoPanel');
+    const closePanelButton = document.getElementById('closePanelButton');
+    const resetViewButton = document.getElementById('resetViewButton');
+    const minimizePanelButton = document.getElementById('minimizePanelButton');
+    const showPanelButton = document.getElementById('showPanelButton');
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    const homeDestination = Cesium.Cartesian3.fromDegrees(136.0, -3.2, 1700000);
+    
+    wilayahKerja.forEach(w => {
+        viewer.entities.add({
+            id: w.id,
+            name: w.name,
+            position: Cesium.Cartesian3.fromDegrees(w.lon, w.lat),
+            point: { pixelSize: 10, color: Cesium.Color.RED, outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+            label: { text: w.name, font: '14pt sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -15), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+        });
+    });
+
+    for (const [wilayahId, data] of Object.entries(dataWilayah)) {
+        companyEntities[wilayahId] = [];
+        if (data.lokasi) {
+            data.lokasi.forEach(lok => {
+                const entity = viewer.entities.add({
+                    name: lok.nama,
+                    position: Cesium.Cartesian3.fromDegrees(lok.lon, lok.lat),
+                    point: { pixelSize: 8, color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+                    label: { text: lok.nama, font: '12pt sans-serif', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, style: Cesium.LabelStyle.FILL_AND_OUTLINE, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, -10), show: false },
+                    show: false
+                });
+                companyEntities[wilayahId].push(entity);
+            });
+        }
+    }
+
+    function createTableHTML(group, wilayahId) {
+        let html = `<h3>${group.nama} (${group.wna.length} orang)</h3>`;
+        if (group.wna && group.wna.length > 0) {
+            html += `
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 5%;">No.</th>
+                            <th style="width: 30%;">Nama</th>
+                            <th style="width: 20%;">Kebangsaan</th>
+                            <th style="width: 30%;">No. Paspor</th>
+                            <th style="width: 15%;">Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            group.wna.forEach(wna => {
+                html += `
+                    <tr>
+                        <td>${wna.no}</td>
+                        <td>${wna.nama}</td>
+                        <td>${wna.kebangsaan}</td>
+                        <td>${wna.paspor || '-'}</td>
+                        <td><button class="detail-button" data-wilayah="${wilayahId}" data-nama="${wna.nama}">Lihat</button></td>
+                    </tr>
+                `;
+            });
+            html += `</tbody></table>`;
+        } else {
+            html += `<p>Tidak ada data WNA di kategori ini.</p>`;
+        }
+        return html;
+    }
+    
+    handler.setInputAction(function(movement) {
+        const pickedObject = viewer.scene.pick(movement.position);
+        if (Cesium.defined(pickedObject) && Cesium.defined(pickedObject.id)) {
+            const entity = pickedObject.id;
+            const entityId = entity.id;
+            
+            Object.values(companyEntities).flat().forEach(e => {
+                e.show = false;
+                if (e.label) e.label.show = false;
+            });
+            
+            const wilayahData = wilayahKerja.find(w => w.id === entityId);
+            if (wilayahData) {
+                titleOverlay.innerHTML = `DATA ORANG ASING DI ${entity.name.toUpperCase()}`;
+                if (companyEntities[entityId]) {
+                    companyEntities[entityId].forEach(e => {
+                        e.show = true;
+                        if (e.label) e.label.show = true;
+                    });
+                }
+                const dataToShow = dataWilayah[entityId];
+                if (dataToShow) {
+                    const panelTitle = document.getElementById('panelTitle');
+                    const panelContent = document.getElementById('panelContent');
+                    panelTitle.innerText = `Rekapitulasi WNA ${entity.name}`;
+                    let contentHTML = `<p><strong>Total WNA: ${dataToShow.totalWNA} orang</strong></p>`;
+                    if (dataToShow.totalWNA > 0) {
+                        if (dataToShow.lokasi) contentHTML += dataToShow.lokasi.map(group => createTableHTML(group, entityId)).join('');
+                        if (dataToShow.kategori) contentHTML += dataToShow.kategori.map(group => createTableHTML(group, entityId)).join('');
+                    } else {
+                        contentHTML += `<p>Tidak ada data WNA yang tercatat untuk wilayah ini.</p>`;
+                    }
+                    panelContent.innerHTML = contentHTML;
+                    infoPanel.style.display = 'flex';
+                    showPanelButton.style.display = 'none';
+                }
+                viewer.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(wilayahData.lon, wilayahData.lat, wilayahData.zoomHeight),
+                    orientation: { heading: Cesium.Math.toRadians(0.0), pitch: Cesium.Math.toRadians(-90.0), roll: 0.0 },
+                    duration: 1.5 
+                });
+                resetViewButton.style.display = 'block';
+            }
+        }
+    }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    
+    const tooltip = document.getElementById('tooltip');
+    handler.setInputAction(function(movement) {
+        const pickedObject = viewer.scene.pick(movement.endPosition);
+        if (Cesium.defined(pickedObject) && Cesium.defined(pickedObject.id)) {
+            const entity = pickedObject.id;
+            const text = entity.name;
+            if (text) {
+                tooltip.style.display = 'block';
+                tooltip.style.left = movement.endPosition.x + 10 + 'px';
+                tooltip.style.top = movement.endPosition.y + 10 + 'px';
+                tooltip.innerText = text;
+            } else {
+                tooltip.style.display = 'none';
+            }
+        } else {
+            tooltip.style.display = 'none';
+        }
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+    resetViewButton.addEventListener('click', () => {
+        viewer.camera.flyTo({ destination: homeDestination, duration: 2 });
+        resetViewButton.style.display = 'none';
+        infoPanel.style.display = 'none';
+        showPanelButton.style.display = 'none';
+        Object.values(companyEntities).flat().forEach(e => {
+            e.show = false;
+            if (e.label) e.label.show = false;
+        });
+        titleOverlay.innerHTML = defaultTitleHTML;
+    });
+
+    closePanelButton.addEventListener('click', () => {
+        infoPanel.style.display = 'none';
+        showPanelButton.style.display = 'none';
+    });
+    
+    minimizePanelButton.addEventListener('click', () => {
+        infoPanel.style.display = 'none';
+        showPanelButton.style.display = 'block';
+    });
+
+    showPanelButton.addEventListener('click', () => {
+        infoPanel.style.display = 'flex';
+        showPanelButton.style.display = 'none';
+    });
+
+    const modal = document.getElementById('detailsModal');
+    const modalCloseButton = document.getElementById('modalCloseButton');
+    
+    document.getElementById('infoPanel').addEventListener('click', function(event) {
+        if (event.target.classList.contains('detail-button')) {
+            const button = event.target;
+            const wilayahId = button.dataset.wilayah;
+            const namaWNA = button.dataset.nama;
+            
+            let foundWNA = null;
+            const allGroups = [...(dataWilayah[wilayahId].lokasi || []), ...(dataWilayah[wilayahId].kategori || [])];
+            for (const group of allGroups) {
+                foundWNA = group.wna.find(w => w.nama === namaWNA);
+                if (foundWNA) break;
+            }
+
+            if (foundWNA) {
+                document.getElementById('modalName').innerText = foundWNA.nama;
+                document.getElementById('modalKebangsaan').innerText = foundWNA.kebangsaan || '-';
+                document.getElementById('modalLp').innerText = foundWNA.lp === 'L' ? 'Laki-laki' : 'Perempuan';
+                document.getElementById('modalTtl').innerText = `${foundWNA.tempatLahir || '-'}, ${foundWNA.tglLahir || '-'}`;
+                document.getElementById('modalPaspor').innerText = foundWNA.paspor || '-';
+                document.getElementById('modalJenisIzin').innerText = foundWNA.jenisIzin || '-';
+                document.getElementById('modalMasaBerlaku').innerText = foundWNA.masaBerlaku || '-';
+                document.getElementById('modalStatus').innerText = foundWNA.status || '-';
+                document.getElementById('modalKeterangan').innerText = foundWNA.keterangan || '-';
+                modal.style.display = 'flex';
+            }
+        }
+    });
+
+    modalCloseButton.onclick = () => { modal.style.display = "none"; };
+    window.onclick = (event) => { if (event.target == modal) { modal.style.display = "none"; } };
+    
+    setTimeout(() => { viewer.camera.flyTo({ destination: homeDestination, duration: 5 }); }, 1000);
+  </script>
+</body>
+</html>
